@@ -925,6 +925,7 @@ footer{background:var(--espresso-2);color:var(--linen)}
               <div class="fld"><label for="msg">Quelques mots sur le chantier</label><textarea id="msg" name="msg" required placeholder="Ex. : refaire la toiture d’une longère de 120 m², tuiles plates, accès par un chemin étroit."></textarea></div>
             </div>
           </div>
+          <input type="checkbox" name="botcheck" tabindex="-1" autocomplete="off" aria-hidden="true" style="display:none">
           <div class="form-foot" data-step="5">
             <button class="btn btn--solid magnet" type="submit">Envoyer ma demande de devis <span class="arr">→</span></button>
             <span class="form-msg" id="formMsg" role="status">Choisissez au moins un type de projet.</span>
@@ -1319,6 +1320,7 @@ footer{background:var(--espresso-2);color:var(--linen)}
 
   /* ---------- Form ---------- */
   const form = $('#form'), formMsg = $('#formMsg');
+  let sending = false, sent = false;
   const telDigits = () => form.tel.value.replace(/\D/g, '');
   const telOk = () => { const d = telDigits(); return d.length === 10 || (d.length === 11 && d.startsWith('33')); };
   let telTouched = false;
@@ -1354,16 +1356,49 @@ footer{background:var(--espresso-2);color:var(--linen)}
       });
       if (s <= 4 && open && !ok) { first = s; open = false; }
     }
-    formMsg.className = 'form-msg';
+    if (sent) return !first;
+    formMsg.className = 'form-msg'; formMsg.style.color = '';
     formMsg.textContent = first ? hints[first] : 'Tout est prêt, vous pouvez envoyer.';
     return !first;
   };
   form.addEventListener('input', refreshForm); form.addEventListener('change', refreshForm);
   refreshForm();
-  form.addEventListener('submit', e => {
+  /* Envoi de la demande par e-mail via Web3Forms */
+  const WEB3FORMS_KEY = '7060d664-1883-4242-9bbc-9fca64893048';
+  form.addEventListener('submit', async e => {
     e.preventDefault();
-    if (!refreshForm()) return;
-    formMsg.className = 'form-msg ok'; formMsg.textContent = `Merci ${form.nom.value.trim()}, votre demande est prête. (Démo : formulaire à relier à votre messagerie.)`;
+    if (sending || sent || !refreshForm()) return;
+    const btn = form.querySelector('button[type=submit]'), label = btn.innerHTML;
+    const v = n => (form[n] && form[n].value || '').trim();
+    const metiers = $$('input[name=metier]:checked', form).map(c => c.value).join(', ');
+    const payload = {
+      access_key: WEB3FORMS_KEY,
+      subject: `Nouvelle demande de devis – ${v('nom')}${v('ville') ? ' (' + v('ville') + ')' : ''}`,
+      from_name: 'Site Entreprise Gerard Lestangt',
+      botcheck: form.botcheck.checked,
+      'Projet': metiers,
+      'Nom': v('nom'),
+      'Téléphone': v('tel') || '—',
+      'E-mail': v('mail') || '—',
+      'Commune du chantier': v('ville'),
+      'Échéance': v('delai'),
+      'Message': v('msg'),
+      'Envoyé depuis': location.href.split('#')[0]
+    };
+    if (mailOk()) payload.replyto = v('mail');
+    sending = true; btn.disabled = true; btn.innerHTML = 'Envoi en cours…';
+    formMsg.className = 'form-msg'; formMsg.textContent = 'Envoi de votre demande…';
+    try {
+      const r = await fetch('https://api.web3forms.com/submit', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.success === false) throw new Error(j.message || 'Erreur');
+      sent = true; btn.innerHTML = 'Demande envoyée ✓';
+      formMsg.className = 'form-msg ok'; formMsg.textContent = `Merci ${v('nom')}, votre demande est bien envoyée. Nous vous recontactons sous 48 h ouvrées.`;
+    } catch (err) {
+      btn.disabled = false; btn.innerHTML = label;
+      formMsg.className = 'form-msg'; formMsg.style.color = '#c2502f';
+      formMsg.textContent = 'L’envoi n’a pas fonctionné. Réessayez dans un instant ou appelez-nous au 06 86 61 32 77.';
+    } finally { sending = false; }
   });
 
   /* Boutons « Un projet de … » : cochent le métier dans le formulaire */
